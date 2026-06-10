@@ -6,6 +6,12 @@ const { enviarMensagem } = require('./whatsapp');
 const app = express();
 app.use(express.json());
 
+// Log de todas as requisições para debug
+app.use((req, _res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
+});
+
 const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || 'metas_semanais_token';
 
 // Verificação do webhook pela Meta
