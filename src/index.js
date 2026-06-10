@@ -55,7 +55,7 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
-// Health check
+// Health check (também usado pelo keep-alive)
 app.get('/', (req, res) => {
   res.json({ status: 'ok', servico: 'Metas Semanais Bot' });
 });
@@ -64,4 +64,21 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Bot rodando na porta ${PORT}`);
   console.log(`🔑 Verify token: ${VERIFY_TOKEN}`);
+  agendarKeepAlive();
 });
+
+// Evita que o Render.com desligue o servidor por inatividade.
+// Faz um ping em si mesmo a cada 14 minutos (limite é 15 min).
+function agendarKeepAlive() {
+  const url = process.env.APP_URL;
+  if (!url) return;
+
+  const axios = require('axios');
+  setInterval(async () => {
+    try {
+      await axios.get(url);
+    } catch (_) {
+      // silencioso
+    }
+  }, 14 * 60 * 1000);
+}
