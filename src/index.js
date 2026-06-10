@@ -68,6 +68,48 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
+// Inscreve o app na conta do WhatsApp Business. Sem essa inscrição a Meta
+// gera os eventos de mensagens reais mas não os entrega ao webhook
+// (o teste do painel não passa por ela, por isso funcionava).
+// Uso no navegador: /subscribe?waba=ID_DA_CONTA&token=VERIFY_TOKEN
+app.get('/subscribe', async (req, res) => {
+  if (req.query.token !== VERIFY_TOKEN) {
+    return res.status(403).json({ erro: 'token inválido' });
+  }
+  const waba = req.query.waba;
+  if (!waba) {
+    return res.status(400).json({ erro: 'informe ?waba=ID_DA_CONTA_WHATSAPP_BUSINESS' });
+  }
+
+  const axios = require('axios');
+  const headers = { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}` };
+  const resultado = {};
+
+  try {
+    const sub = await axios.post(
+      `https://graph.facebook.com/v19.0/${waba}/subscribed_apps`,
+      {},
+      { headers }
+    );
+    resultado.inscricao = sub.data;
+  } catch (err) {
+    resultado.inscricao_erro = err.response?.data || err.message;
+  }
+
+  try {
+    const lista = await axios.get(
+      `https://graph.facebook.com/v19.0/${waba}/subscribed_apps`,
+      { headers }
+    );
+    resultado.apps_inscritos = lista.data;
+  } catch (err) {
+    resultado.apps_inscritos_erro = err.response?.data || err.message;
+  }
+
+  console.log('🔔 Resultado /subscribe:', JSON.stringify(resultado));
+  res.json(resultado);
+});
+
 // Health check (também usado pelo keep-alive)
 app.get('/', (req, res) => {
   res.json({ status: 'ok', servico: 'Metas Semanais Bot' });
