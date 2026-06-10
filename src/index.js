@@ -116,10 +116,14 @@ app.get('/', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 Bot rodando na porta ${PORT}`);
-  console.log(`🔑 Verify token: ${VERIFY_TOKEN}`);
-  agendarKeepAlive();
+const db = require('./database');
+
+db.carregar().then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀 Bot rodando na porta ${PORT}`);
+    console.log(`🔑 Verify token: ${VERIFY_TOKEN}`);
+    agendarKeepAlive();
+  });
 });
 
 // Evita que o Render.com desligue o servidor por inatividade.
