@@ -39,6 +39,13 @@ app.post('/webhook', async (req, res) => {
     for (const entry of body.entry || []) {
       for (const change of entry.changes || []) {
         const value = change.value;
+
+        // Status de entrega das respostas enviadas (sent/delivered/failed)
+        for (const st of value?.statuses || []) {
+          const erros = st.errors ? ' | erros: ' + JSON.stringify(st.errors) : '';
+          console.log(`📬 Status "${st.status}" para ${st.recipient_id}${erros}`);
+        }
+
         if (!value?.messages) continue;
 
         for (const msg of value.messages) {
