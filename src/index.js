@@ -139,5 +139,5 @@ function agendarKeepAlive() {
     } catch (_) {
       // silencioso
     }
-  }, 14 * 60 * 1000);
+  }, 5 * 60 * 1000);
 }
