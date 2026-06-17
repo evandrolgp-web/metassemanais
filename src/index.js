@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const { processarMensagem } = require('./bot');
-const { enviarMensagem } = require('./whatsapp');
+const { enviarMensagem, registrarMensagemRecebida } = require('./whatsapp');
 
 const app = express();
 app.use(express.json());
@@ -55,6 +55,10 @@ app.post('/webhook', async (req, res) => {
           const texto = msg.text?.body;
 
           console.log(`📩 Mensagem de ${de}: ${texto}`);
+
+          // Registra o timestamp para garantir que a resposta fique
+          // dentro da janela gratuita de 24h (trava anti-custo)
+          registrarMensagemRecebida(de);
 
           const resposta = processarMensagem(texto, de);
           if (resposta) {

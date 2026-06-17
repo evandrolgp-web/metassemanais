@@ -13,9 +13,33 @@ function normalizarNumeroBR(numero) {
   return numero;
 }
 
+// Rastreia a última mensagem recebida de cada número (timestamp Unix).
+// Só respondemos se a mensagem chegou há menos de 24h — isso garante
+// que estamos sempre dentro da janela de conversa iniciada pelo usuário,
+// que é gratuita na API da Meta. Fora dessa janela seria necessário
+// enviar um template aprovado (pago). Bloqueamos o envio em vez de
+// arriscar qualquer custo.
+const ultimaMensagemRecebida = new Map();
+
+function registrarMensagemRecebida(telefone) {
+  ultimaMensagemRecebida.set(telefone, Date.now());
+}
+
+function dentroJanela24h(telefone) {
+  const ts = ultimaMensagemRecebida.get(telefone);
+  if (!ts) return false;
+  return Date.now() - ts < 23.5 * 60 * 60 * 1000; // 23h30 de margem
+}
+
 async function enviarMensagem(para, texto) {
   const { WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID } = process.env;
   para = normalizarNumeroBR(para);
+
+  // Trava anti-custo: bloqueia envio fora da janela gratuita de 24h
+  if (!dentroJanela24h(para) && !dentroJanela24h(para.replace(/^559/, '55'))) {
+    console.warn(`🚫 Envio bloqueado para ${para}: fora da janela de 24h (seria pago)`);
+    return;
+  }
 
   try {
     const resp = await axios.post(
@@ -35,7 +59,6 @@ async function enviarMensagem(para, texto) {
     );
     console.log(`✅ Resposta enviada para ${para}:`, JSON.stringify(resp.data));
   } catch (err) {
-    // Mostra o erro exato retornado pela API da Meta (código, mensagem, detalhes)
     const detalhe = err.response?.data
       ? JSON.stringify(err.response.data, null, 2)
       : err.message;
@@ -43,4 +66,4 @@ async function enviarMensagem(para, texto) {
   }
 }
 
-module.exports = { enviarMensagem };
+module.exports = { enviarMensagem, registrarMensagemRecebida };
