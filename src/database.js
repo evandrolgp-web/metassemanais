@@ -3,11 +3,11 @@ const path = require('path');
 const axios = require('axios');
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'ganhos.json');
+const TZ = 'America/Sao_Paulo';
 
-// Dados mantidos em memória; persistidos em um GitHub Gist (se configurado)
-// e em arquivo local como cache. O Gist sobrevive a deploys/reinícios do
-// Render, o arquivo local não.
-let dados = { ganhos: [] };
+// Estrutura:
+// { ganhos: [...], metas: { "INICIO_FIM": valor }, estado: { "telefone": {...} } }
+let dados = { ganhos: [], metas: {}, estado: {} };
 let remotoOk = false;
 
 function gistConfig() {
@@ -23,14 +23,21 @@ function gistConfig() {
   };
 }
 
+function normalizarEstrutura(obj) {
+  return {
+    ganhos: Array.isArray(obj?.ganhos) ? obj.ganhos : [],
+    metas: obj && typeof obj.metas === 'object' ? obj.metas : {},
+    estado: obj && typeof obj.estado === 'object' ? obj.estado : {},
+  };
+}
+
 async function carregar() {
   const cfg = gistConfig();
   if (cfg) {
     try {
       const resp = await axios.get(cfg.url, { headers: cfg.headers });
       const arquivo = resp.data.files['ganhos.json'];
-      const conteudo = arquivo ? JSON.parse(arquivo.content) : null;
-      dados = conteudo && Array.isArray(conteudo.ganhos) ? conteudo : { ganhos: [] };
+      dados = normalizarEstrutura(arquivo ? JSON.parse(arquivo.content) : null);
       remotoOk = true;
       console.log(`💾 Dados carregados do GitHub Gist (${dados.ganhos.length} registros)`);
       return;
@@ -43,9 +50,9 @@ async function carregar() {
   }
 
   try {
-    dados = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
+    dados = normalizarEstrutura(JSON.parse(fs.readFileSync(DB_PATH, 'utf8')));
   } catch {
-    dados = { ganhos: [] };
+    dados = { ganhos: [], metas: {}, estado: {} };
   }
 }
 
@@ -72,15 +79,22 @@ function salvar() {
   }
 }
 
-function registrarGanho(valor, data) {
-  const d = data ? new Date(data + 'T12:00:00') : new Date();
+function resetar() {
+  dados = { ganhos: [], metas: {}, estado: {} };
+  salvar();
+}
+
+// ---- ganhos ----
+
+function registrarGanho(valor) {
+  const d = spHoje();
   dados.ganhos.push({
     id: Date.now(),
     valor,
     data: formatarData(d),
     semana: getSemanaStr(d),
     mes: getMesStr(d),
-    ano: d.getFullYear(),
+    ano: d.getUTCFullYear(),
     criado_em: new Date().toISOString(),
   });
   salvar();
@@ -91,7 +105,7 @@ function getTotalSemana(semana) {
 }
 
 function getTotalMesAtual() {
-  const mes = getMesStr(new Date());
+  const mes = getMesStr(spHoje());
   return dados.ganhos.filter(g => g.mes === mes).reduce((s, g) => s + g.valor, 0);
 }
 
@@ -105,7 +119,7 @@ function getTotalMesPorNome(nomeMes) {
   const num = meses[normalizado];
   if (!num) return null;
 
-  const ano = new Date().getFullYear();
+  const ano = spHoje().getUTCFullYear();
   const mes = `${ano}-${num}`;
   const total = dados.ganhos.filter(g => g.mes === mes).reduce((s, g) => s + g.valor, 0);
   return { total, mes };
@@ -115,53 +129,103 @@ function getGanhosDia(data) {
   return dados.ganhos.filter(g => g.data === data);
 }
 
-function getSemanaAtual() {
-  return getSemanaStr(new Date());
+// ---- metas por semana ----
+
+function getMeta(semana) {
+  const v = dados.metas[semana];
+  return typeof v === 'number' ? v : null;
 }
 
-function getMesAtual() {
-  return getMesStr(new Date());
+function setMeta(semana, valor) {
+  dados.metas[semana] = valor;
+  salvar();
 }
 
-// ---- helpers ----
+// ---- estado da conversa (por telefone) ----
+
+function getEstado(telefone) {
+  return dados.estado[telefone] || null;
+}
+
+function setEstado(telefone, obj) {
+  dados.estado[telefone] = obj;
+  salvar();
+}
+
+function limparEstado(telefone) {
+  delete dados.estado[telefone];
+  salvar();
+}
+
+// ---- datas no fuso de São Paulo ----
+
+// Retorna um Date "à meia-noite UTC" representando o dia-calendário atual
+// em São Paulo. Usar métodos getUTC* nesse objeto dá os componentes corretos
+// do dia em SP, independentemente do fuso do servidor (Render roda em UTC).
+function spHoje() {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  const p = fmt.formatToParts(new Date());
+  const get = (t) => +p.find(x => x.type === t).value;
+  return new Date(Date.UTC(get('year'), get('month') - 1, get('day')));
+}
 
 function formatarData(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+function getInicioDaSemana(d) {
+  const dia = new Date(d);
+  const dow = dia.getUTCDay(); // 0=domingo
+  const diff = dow === 0 ? -6 : 1 - dow; // segunda como início
+  dia.setUTCDate(dia.getUTCDate() + diff);
+  return dia;
 }
 
 function getSemanaStr(d) {
   const inicio = getInicioDaSemana(d);
   const fim = new Date(inicio);
-  fim.setDate(fim.getDate() + 6);
+  fim.setUTCDate(fim.getUTCDate() + 6);
   return `${formatarData(inicio)}_${formatarData(fim)}`;
 }
 
 function getMesStr(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
   return `${y}-${m}`;
 }
 
-function getInicioDaSemana(d) {
-  const dia = new Date(d);
-  const diaSemana = dia.getDay();
-  const diff = diaSemana === 0 ? -6 : 1 - diaSemana;
-  dia.setDate(dia.getDate() + diff);
-  dia.setHours(0, 0, 0, 0);
-  return dia;
+function getSemanaAtual() {
+  return getSemanaStr(spHoje());
+}
+
+function getMesAtual() {
+  return getMesStr(spHoje());
+}
+
+function getDataHoje() {
+  return formatarData(spHoje());
 }
 
 module.exports = {
   carregar,
+  resetar,
   registrarGanho,
   getTotalSemana,
   getTotalMesAtual,
   getTotalMesPorNome,
   getGanhosDia,
+  getMeta,
+  setMeta,
+  getEstado,
+  setEstado,
+  limparEstado,
   getSemanaAtual,
   getMesAtual,
-  formatarData,
+  getDataHoje,
 };

@@ -56,7 +56,7 @@ app.post('/webhook', async (req, res) => {
 
           console.log(`📩 Mensagem de ${de}: ${texto}`);
 
-          const resposta = processarMensagem(texto);
+          const resposta = processarMensagem(texto, de);
           if (resposta) {
             await enviarMensagem(de, resposta);
           }
@@ -108,6 +108,17 @@ app.get('/subscribe', async (req, res) => {
 
   console.log('🔔 Resultado /subscribe:', JSON.stringify(resultado));
   res.json(resultado);
+});
+
+// Limpa todos os dados (ganhos, metas e estado). Protegido pelo verify token.
+// Uso no navegador: /reset?token=VERIFY_TOKEN
+app.get('/reset', (req, res) => {
+  if (req.query.token !== VERIFY_TOKEN) {
+    return res.status(403).json({ erro: 'token inválido' });
+  }
+  require('./database').resetar();
+  console.log('🧹 Dados zerados via /reset');
+  res.json({ ok: true, mensagem: 'Dados zerados' });
 });
 
 // Health check (também usado pelo keep-alive)
