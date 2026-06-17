@@ -21,12 +21,14 @@ function normalizarNumeroBR(numero) {
 // arriscar qualquer custo.
 const ultimaMensagemRecebida = new Map();
 
+// Sempre usa o número normalizado (com nono dígito) como chave, para
+// casar com o número usado no envio da resposta.
 function registrarMensagemRecebida(telefone) {
-  ultimaMensagemRecebida.set(telefone, Date.now());
+  ultimaMensagemRecebida.set(normalizarNumeroBR(telefone), Date.now());
 }
 
 function dentroJanela24h(telefone) {
-  const ts = ultimaMensagemRecebida.get(telefone);
+  const ts = ultimaMensagemRecebida.get(normalizarNumeroBR(telefone));
   if (!ts) return false;
   return Date.now() - ts < 23.5 * 60 * 60 * 1000; // 23h30 de margem
 }
@@ -36,7 +38,7 @@ async function enviarMensagem(para, texto) {
   para = normalizarNumeroBR(para);
 
   // Trava anti-custo: bloqueia envio fora da janela gratuita de 24h
-  if (!dentroJanela24h(para) && !dentroJanela24h(para.replace(/^559/, '55'))) {
+  if (!dentroJanela24h(para)) {
     console.warn(`🚫 Envio bloqueado para ${para}: fora da janela de 24h (seria pago)`);
     return;
   }
