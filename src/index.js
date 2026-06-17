@@ -14,6 +14,26 @@ app.use((req, _res, next) => {
 
 const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || 'metas_semanais_token';
 
+// Números autorizados a usar o bot (lista separada por vírgula no .env).
+// Comparação ignora o nono dígito para casar formatos com/sem o 9.
+// Vazio = qualquer número pode usar.
+const NUMEROS_AUTORIZADOS = (process.env.NUMEROS_AUTORIZADOS || '')
+  .split(',')
+  .map(n => n.replace(/\D/g, ''))
+  .filter(Boolean);
+
+function soDigitosSemNove(numero) {
+  const n = numero.replace(/\D/g, '');
+  // remove o nono dígito de celulares BR (55 + DDD + 9 + 8 dígitos)
+  return n.replace(/^(55\d{2})9(\d{8})$/, '$1$2');
+}
+
+function numeroAutorizado(numero) {
+  if (NUMEROS_AUTORIZADOS.length === 0) return true;
+  const alvo = soDigitosSemNove(numero);
+  return NUMEROS_AUTORIZADOS.some(n => soDigitosSemNove(n) === alvo);
+}
+
 // Verificação do webhook pela Meta
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
@@ -55,6 +75,13 @@ app.post('/webhook', async (req, res) => {
           const texto = msg.text?.body;
 
           console.log(`📩 Mensagem de ${de}: ${texto}`);
+
+          // Ignora silenciosamente números não autorizados — não responde
+          // (não consome cota) e não deixa terceiros mexerem nos dados.
+          if (!numeroAutorizado(de)) {
+            console.log(`⛔ Número não autorizado, ignorado: ${de}`);
+            continue;
+          }
 
           // Registra o timestamp para garantir que a resposta fique
           // dentro da janela gratuita de 24h (trava anti-custo)
