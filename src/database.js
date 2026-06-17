@@ -175,6 +175,32 @@ function removerUltimoGanho(semana) {
   return null;
 }
 
+// Edita o último ganho da semana cujo valor seja igual a valorAntigo,
+// trocando-o por valorNovo. Retorna o registro atualizado ou null se não achar.
+function editarUltimoGanhoSemana(semana, valorAntigo, valorNovo) {
+  for (let i = dados.ganhos.length - 1; i >= 0; i--) {
+    if (dados.ganhos[i].semana === semana && dados.ganhos[i].valor === valorAntigo) {
+      dados.ganhos[i].valor = valorNovo;
+      salvar();
+      return dados.ganhos[i];
+    }
+  }
+  return null;
+}
+
+// Edita o último ganho de um dia específico (YYYY-MM-DD) cujo valor seja
+// valorAntigo, trocando-o por valorNovo. Retorna o registro ou null.
+function editarGanhoDia(dataStr, valorAntigo, valorNovo) {
+  for (let i = dados.ganhos.length - 1; i >= 0; i--) {
+    if (dados.ganhos[i].data === dataStr && dados.ganhos[i].valor === valorAntigo) {
+      dados.ganhos[i].valor = valorNovo;
+      salvar();
+      return dados.ganhos[i];
+    }
+  }
+  return null;
+}
+
 // Retorna as últimas N semanas que têm meta definida ou algum ganho,
 // da mais recente para a mais antiga, com total e meta de cada uma.
 function getHistoricoSemanas(limite = 6) {
@@ -296,6 +322,8 @@ module.exports = {
   getGanhosDia,
   getGanhosSemana,
   removerUltimoGanho,
+  editarUltimoGanhoSemana,
+  editarGanhoDia,
   getHistoricoSemanas,
   getMeta,
   setMeta,

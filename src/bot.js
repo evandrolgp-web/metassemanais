@@ -134,6 +134,43 @@ function processarMensagem(texto, telefone) {
     return registrarRetroativo(valorData, dataStr);
   }
 
+  // Editar por data: "15/06 editar 150 para 200"
+  const matchEditarData = msg.match(
+    /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\s+editar\s+(?:r\$\s*)?(\d{1,7}(?:[.,]\d{1,2})?)\s+para\s+(?:r\$\s*)?(\d{1,7}(?:[.,]\d{1,2})?)$/i
+  );
+  if (matchEditarData) {
+    const antigo = parseValor(matchEditarData[4]);
+    const novo = parseValor(matchEditarData[5]);
+    if (antigo === null || novo === null) return '❓ Valores inválidos. Ex: `15/06 editar 150 para 200`';
+    const dataStr = db.montarData(+matchEditarData[1], +matchEditarData[2], matchEditarData[3] ? +matchEditarData[3] : null);
+    if (!dataStr) return '❓ Data inválida. Use `DD/MM` ou `DD/MM/AAAA`.';
+    return editarPorData(dataStr, antigo, novo);
+  }
+
+  // Editar na semana atual: "editar 150 para 200"
+  const matchEditar = msg.match(
+    /^editar\s+(?:r\$\s*)?(\d{1,7}(?:[.,]\d{1,2})?)\s+para\s+(?:r\$\s*)?(\d{1,7}(?:[.,]\d{1,2})?)$/i
+  );
+  if (matchEditar) {
+    const antigo = parseValor(matchEditar[1]);
+    const novo = parseValor(matchEditar[2]);
+    if (antigo === null || novo === null) return '❓ Valores inválidos. Ex: `editar 150 para 200`';
+    return editarNaSemana(antigo, novo);
+  }
+
+  // Múltiplos valores numa só mensagem: "150 200 300"
+  const tokens = msg.split(/\s+/);
+  if (tokens.length >= 2 && tokens.every(t => parseValor(t) !== null)) {
+    const valores = tokens.map(parseValor);
+    if (db.getMeta(semana) === null) {
+      // Sem meta ainda: primeiro valor vira o ganho pendente; pede a meta.
+      // (Para simplificar, lançamos só após a meta; aqui pedimos a meta
+      // e guardamos apenas o primeiro; o usuário reenvia os demais.)
+      return pedirMeta(telefone, valores[0]);
+    }
+    return registrarMultiplos(valores, semana);
+  }
+
   // Valor (registrar ganho)
   const valor = parseValor(msg);
   if (valor !== null) {
@@ -165,13 +202,20 @@ function registrarEResponder(valor, semana) {
   const totalSemana = db.getTotalSemana(semana);
   const falta = Math.max(meta - totalSemana, 0);
   const atingiu = totalSemana >= meta;
+  // Este lançamento foi o que cruzou a meta agora?
+  const cruzouAgora = atingiu && (totalSemana - valor) < meta;
 
   const totalDia = db.getGanhosDia(db.getDataHoje()).reduce((s, r) => s + r.valor, 0);
 
   const barra = barraProgresso(totalSemana, meta);
   const percentual = meta > 0 ? Math.min((totalSemana / meta) * 100, 100).toFixed(1) : '0';
 
-  let resposta = `✅ *Ganho registrado!*\n`;
+  let resposta = '';
+  if (cruzouAgora) {
+    resposta += `🎉🎉🎉 *META DA SEMANA BATIDA!* 🎉🎉🎉\n`;
+    resposta += `Foi esse ganho que fechou a meta. Parabéns! 👏\n\n`;
+  }
+  resposta += `✅ *Ganho registrado!*\n`;
   resposta += `💰 Valor: ${formatarMoeda(valor)}\n`;
   resposta += `📅 Total hoje: ${formatarMoeda(totalDia)}\n\n`;
   resposta += `📊 *Meta da Semana:* ${formatarMoeda(meta)}\n`;
@@ -180,7 +224,9 @@ function registrarEResponder(valor, semana) {
 
   if (atingiu) {
     const excedente = totalSemana - meta;
-    resposta += `\n🎉 *Parabéns! Meta da semana atingida!*`;
+    if (!cruzouAgora) {
+      resposta += `\n🎉 *Meta da semana atingida!*`;
+    }
     if (excedente > 0) {
       resposta += `\n➕ Excedente: ${formatarMoeda(excedente)}`;
     }
@@ -189,6 +235,93 @@ function registrarEResponder(valor, semana) {
     resposta += linhaPorDia(falta);
   }
 
+  return resposta;
+}
+
+// Registra vários ganhos de hoje numa só mensagem ("150 200 300").
+function registrarMultiplos(valores, semana) {
+  const metaAntes = db.getMeta(semana);
+  const totalAntes = db.getTotalSemana(semana);
+
+  for (const v of valores) db.registrarGanho(v);
+
+  const meta = db.getMeta(semana);
+  const totalSemana = db.getTotalSemana(semana);
+  const falta = Math.max(meta - totalSemana, 0);
+  const atingiu = totalSemana >= meta;
+  const cruzouAgora = atingiu && totalAntes < meta;
+
+  const totalDia = db.getGanhosDia(db.getDataHoje()).reduce((s, r) => s + r.valor, 0);
+  const somaLote = valores.reduce((s, v) => s + v, 0);
+  const barra = barraProgresso(totalSemana, meta);
+  const percentual = meta > 0 ? Math.min((totalSemana / meta) * 100, 100).toFixed(1) : '0';
+
+  let resposta = '';
+  if (cruzouAgora) {
+    resposta += `🎉🎉🎉 *META DA SEMANA BATIDA!* 🎉🎉🎉\n👏\n\n`;
+  }
+  resposta += `✅ *${valores.length} ganhos registrados!*\n`;
+  resposta += valores.map(v => `• ${formatarMoeda(v)}`).join('\n') + '\n';
+  resposta += `➕ Soma do lote: ${formatarMoeda(somaLote)}\n`;
+  resposta += `📅 Total hoje: ${formatarMoeda(totalDia)}\n\n`;
+  resposta += `📊 *Meta da Semana:* ${formatarMoeda(meta)}\n`;
+  resposta += `${barra}\n`;
+  resposta += `Acumulado: ${formatarMoeda(totalSemana)} (${percentual}%)\n`;
+
+  if (atingiu) {
+    const excedente = totalSemana - meta;
+    if (!cruzouAgora) resposta += `\n🎉 *Meta da semana atingida!*`;
+    if (excedente > 0) resposta += `\n➕ Excedente: ${formatarMoeda(excedente)}`;
+  } else {
+    resposta += `⏳ Falta: *${formatarMoeda(falta)}* para a meta`;
+    resposta += linhaPorDia(falta);
+  }
+  return resposta;
+}
+
+// Edita um ganho da semana atual: troca um valor por outro.
+function editarNaSemana(antigo, novo) {
+  const semana = db.getSemanaAtual();
+  const atualizado = db.editarUltimoGanhoSemana(semana, antigo, novo);
+  if (!atualizado) {
+    return `🤷 Não encontrei nenhum ganho de ${formatarMoeda(antigo)} nesta semana para editar.`;
+  }
+  return respostaEdicao(antigo, novo, atualizado);
+}
+
+// Edita um ganho de uma data específica.
+function editarPorData(dataStr, antigo, novo) {
+  const atualizado = db.editarGanhoDia(dataStr, antigo, novo);
+  if (!atualizado) {
+    return `🤷 Não encontrei nenhum ganho de ${formatarMoeda(antigo)} em ${formatarDataBR(dataStr)} para editar.`;
+  }
+  return respostaEdicao(antigo, novo, atualizado);
+}
+
+function respostaEdicao(antigo, novo, registro) {
+  const semana = registro.semana;
+  const meta = db.getMeta(semana);
+  const total = db.getTotalSemana(semana);
+  const [inicio, fim] = semana.split('_');
+  const periodo = `${formatarDataBR(inicio).slice(0, 5)} a ${formatarDataBR(fim).slice(0, 5)}`;
+
+  let resposta = `✏️ *Ganho corrigido!*\n`;
+  resposta += `${formatarMoeda(antigo)} → *${formatarMoeda(novo)}*\n`;
+  resposta += `_(em ${nomeDiaSemana(registro.data)}, ${formatarDataBR(registro.data)})_\n\n`;
+
+  if (meta !== null) {
+    const falta = Math.max(meta - total, 0);
+    const pct = meta > 0 ? Math.min((total / meta) * 100, 100).toFixed(1) : '0';
+    resposta += `📊 *Semana ${periodo}*\n`;
+    resposta += `🎯 Meta: ${formatarMoeda(meta)}\n`;
+    resposta += `${barraProgresso(total, meta)}\n`;
+    resposta += `Acumulado: ${formatarMoeda(total)} (${pct}%)\n`;
+    resposta += total >= meta
+      ? `🎉 Meta atingida!`
+      : `⏳ Falta: *${formatarMoeda(falta)}* para a meta`;
+  } else {
+    resposta += `📊 Total da semana (${periodo}): *${formatarMoeda(total)}*`;
+  }
   return resposta;
 }
 
@@ -351,8 +484,14 @@ const HELP_TEXT = `🤖 *Comandos disponíveis:*
 Digite apenas o valor (ex: \`150\` ou \`150,50\` ou \`R$ 200\`)
 ↳ Na primeira mensagem da semana, eu pergunto qual é a sua meta.
 
+*Vários de uma vez:*
+\`150 200 300\` — registra três ganhos de hoje numa mensagem
+
 *Lançar em dia passado:*
 \`ontem 150\` · \`anteontem 200\` · \`15/06 300\` · \`15/06/2026 300\`
+
+*Corrigir um valor errado:*
+\`editar 150 para 200\` · \`15/06 editar 150 para 200\`
 
 *Consultas:*
 📊 \`/semana\` — Resumo da semana (com detalhe por dia)
