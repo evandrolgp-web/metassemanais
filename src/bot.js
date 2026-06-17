@@ -115,6 +115,25 @@ function processarMensagem(texto, telefone) {
     return responderMesPorNome(matchMes[1]);
   }
 
+  // Lançamento retroativo: "ontem 150", "anteontem 200", "hoje 100"
+  const matchRel = msg.match(/^(hoje|ontem|anteontem)\s+(?:r\$\s*)?(\d{1,7}(?:[.,]\d{1,2})?)$/i);
+  if (matchRel) {
+    const valorRel = parseValor(matchRel[2]);
+    if (valorRel === null) return '❓ Valor inválido. Ex: `ontem 150`';
+    const dias = { hoje: 0, ontem: 1, anteontem: 2 }[matchRel[1].toLowerCase()];
+    return registrarRetroativo(valorRel, db.dataRelativa(dias));
+  }
+
+  // Lançamento retroativo por data: "15/06 200" ou "15/06/2026 200"
+  const matchData = msg.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\s+(?:r\$\s*)?(\d{1,7}(?:[.,]\d{1,2})?)$/);
+  if (matchData) {
+    const valorData = parseValor(matchData[4]);
+    if (valorData === null) return '❓ Valor inválido. Ex: `15/06 200`';
+    const dataStr = db.montarData(+matchData[1], +matchData[2], matchData[3] ? +matchData[3] : null);
+    if (!dataStr) return '❓ Data inválida. Use o formato `DD/MM` ou `DD/MM/AAAA`.';
+    return registrarRetroativo(valorData, dataStr);
+  }
+
   // Valor (registrar ganho)
   const valor = parseValor(msg);
   if (valor !== null) {
@@ -168,6 +187,40 @@ function registrarEResponder(valor, semana) {
   } else {
     resposta += `⏳ Falta: *${formatarMoeda(falta)}* para a meta`;
     resposta += linhaPorDia(falta);
+  }
+
+  return resposta;
+}
+
+function registrarRetroativo(valor, dataStr) {
+  if (dataStr > db.getDataHoje()) {
+    return '⚠️ Não dá para lançar um ganho em data futura.';
+  }
+
+  db.registrarGanho(valor, dataStr);
+
+  const semana = db.getSemanaDeData(dataStr);
+  const meta = db.getMeta(semana);
+  const total = db.getTotalSemana(semana);
+  const [inicio, fim] = semana.split('_');
+  const periodo = `${formatarDataBR(inicio).slice(0, 5)} a ${formatarDataBR(fim).slice(0, 5)}`;
+
+  let resposta = `✅ *Ganho lançado em ${nomeDiaSemana(dataStr)}, ${formatarDataBR(dataStr)}*\n`;
+  resposta += `💰 Valor: ${formatarMoeda(valor)}\n\n`;
+
+  if (meta !== null) {
+    const falta = Math.max(meta - total, 0);
+    const pct = meta > 0 ? Math.min((total / meta) * 100, 100).toFixed(1) : '0';
+    resposta += `📊 *Semana ${periodo}*\n`;
+    resposta += `🎯 Meta: ${formatarMoeda(meta)}\n`;
+    resposta += `${barraProgresso(total, meta)}\n`;
+    resposta += `Acumulado: ${formatarMoeda(total)} (${pct}%)\n`;
+    resposta += total >= meta
+      ? `🎉 Meta atingida!`
+      : `⏳ Falta: *${formatarMoeda(falta)}* para a meta`;
+  } else {
+    resposta += `📊 Total da semana (${periodo}): *${formatarMoeda(total)}*\n`;
+    resposta += `_(essa semana não tem meta definida)_`;
   }
 
   return resposta;
@@ -297,6 +350,9 @@ const HELP_TEXT = `🤖 *Comandos disponíveis:*
 *Registrar ganho:*
 Digite apenas o valor (ex: \`150\` ou \`150,50\` ou \`R$ 200\`)
 ↳ Na primeira mensagem da semana, eu pergunto qual é a sua meta.
+
+*Lançar em dia passado:*
+\`ontem 150\` · \`anteontem 200\` · \`15/06 300\` · \`15/06/2026 300\`
 
 *Consultas:*
 📊 \`/semana\` — Resumo da semana (com detalhe por dia)

@@ -86,8 +86,9 @@ function resetar() {
 
 // ---- ganhos ----
 
-function registrarGanho(valor) {
-  const d = spHoje();
+// Registra um ganho. dataStr (YYYY-MM-DD) é opcional — se omitido, usa hoje.
+function registrarGanho(valor, dataStr) {
+  const d = dataStr ? dataDeStr(dataStr) : spHoje();
   dados.ganhos.push({
     id: Date.now(),
     valor,
@@ -98,6 +99,34 @@ function registrarGanho(valor) {
     criado_em: new Date().toISOString(),
   });
   salvar();
+}
+
+function dataDeStr(s) {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
+}
+
+// Data (YYYY-MM-DD) de N dias atrás, no fuso de São Paulo.
+function dataRelativa(diasAtras) {
+  const d = spHoje();
+  d.setUTCDate(d.getUTCDate() - diasAtras);
+  return formatarData(d);
+}
+
+// Monta uma data YYYY-MM-DD a partir de dia/mês/ano, validando se existe.
+// Ano opcional (usa o atual); aceita ano de 2 dígitos. Retorna null se inválida.
+function montarData(dia, mes, ano) {
+  if (!ano) ano = spHoje().getUTCFullYear();
+  else if (ano < 100) ano += 2000;
+  const d = new Date(Date.UTC(ano, mes - 1, dia));
+  if (d.getUTCFullYear() !== ano || d.getUTCMonth() !== mes - 1 || d.getUTCDate() !== dia) {
+    return null;
+  }
+  return formatarData(d);
+}
+
+function getSemanaDeData(dataStr) {
+  return getSemanaStr(dataDeStr(dataStr));
 }
 
 function getTotalSemana(semana) {
@@ -261,6 +290,9 @@ module.exports = {
   getTotalSemana,
   getTotalMesAtual,
   getTotalMesPorNome,
+  dataRelativa,
+  montarData,
+  getSemanaDeData,
   getGanhosDia,
   getGanhosSemana,
   removerUltimoGanho,
