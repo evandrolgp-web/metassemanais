@@ -1,10 +1,40 @@
 require('dotenv').config();
+const crypto = require('crypto');
 const express = require('express');
 const { processarMensagem } = require('./bot');
 const { enviarMensagem, registrarMensagemRecebida } = require('./whatsapp');
 
 const app = express();
-app.use(express.json());
+
+// Guarda o corpo bruto da requisição para validar a assinatura da Meta.
+// A assinatura é um HMAC sobre os bytes exatos recebidos, então precisamos
+// do raw body antes de o JSON ser parseado.
+app.use(express.json({
+  verify: (req, _res, buf) => { req.rawBody = buf; },
+}));
+
+const APP_SECRET = process.env.WHATSAPP_APP_SECRET || '';
+
+// Valida o cabeçalho X-Hub-Signature-256 enviado pela Meta. Garante que a
+// requisição veio mesmo da Meta (assinada com o App Secret) e não é forjada.
+// Sem isso, qualquer um que conheça a URL poderia injetar mensagens falsas.
+function assinaturaValida(req) {
+  if (!APP_SECRET) {
+    console.warn('⚠️ WHATSAPP_APP_SECRET não configurado — assinatura do webhook NÃO validada!');
+    return true; // não bloqueia até o segredo ser configurado
+  }
+  const assinatura = req.get('X-Hub-Signature-256') || '';
+  if (!assinatura.startsWith('sha256=') || !req.rawBody) return false;
+
+  const esperado = 'sha256=' + crypto
+    .createHmac('sha256', APP_SECRET)
+    .update(req.rawBody)
+    .digest('hex');
+
+  const a = Buffer.from(assinatura);
+  const b = Buffer.from(esperado);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 // Log de todas as requisições para debug
 app.use((req, _res, next) => {
@@ -49,6 +79,12 @@ app.get('/webhook', (req, res) => {
 
 // Recebimento de mensagens
 app.post('/webhook', async (req, res) => {
+  // Rejeita requisições sem assinatura válida da Meta (anti-falsificação)
+  if (!assinaturaValida(req)) {
+    console.warn('🚫 Webhook recusado: assinatura inválida');
+    return res.sendStatus(401);
+  }
+
   // Responder 200 imediatamente para a Meta não reenviar
   res.sendStatus(200);
 
