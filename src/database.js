@@ -129,6 +129,40 @@ function getGanhosDia(data) {
   return dados.ganhos.filter(g => g.data === data);
 }
 
+function getGanhosSemana(semana) {
+  return dados.ganhos.filter(g => g.semana === semana);
+}
+
+// Remove e retorna o último ganho registrado na semana informada.
+// Retorna null se não houver nenhum ganho nessa semana.
+function removerUltimoGanho(semana) {
+  for (let i = dados.ganhos.length - 1; i >= 0; i--) {
+    if (dados.ganhos[i].semana === semana) {
+      const [removido] = dados.ganhos.splice(i, 1);
+      salvar();
+      return removido;
+    }
+  }
+  return null;
+}
+
+// Retorna as últimas N semanas que têm meta definida ou algum ganho,
+// da mais recente para a mais antiga, com total e meta de cada uma.
+function getHistoricoSemanas(limite = 6) {
+  const semanas = new Set([
+    ...Object.keys(dados.metas),
+    ...dados.ganhos.map(g => g.semana),
+  ]);
+  return [...semanas]
+    .sort((a, b) => (a < b ? 1 : -1)) // mais recente primeiro (ordenação por data ISO)
+    .slice(0, limite)
+    .map(semana => ({
+      semana,
+      meta: getMeta(semana),
+      total: getTotalSemana(semana),
+    }));
+}
+
 // ---- metas por semana ----
 
 function getMeta(semana) {
@@ -212,6 +246,14 @@ function getDataHoje() {
   return formatarData(spHoje());
 }
 
+// Dias restantes na semana, incluindo hoje (semana de segunda a domingo).
+// Segunda = 7 dias restantes; domingo = 1 dia restante.
+function getDiasRestantesSemana() {
+  const dow = spHoje().getUTCDay(); // 0=domingo
+  const posicao = dow === 0 ? 7 : dow; // segunda=1 ... domingo=7
+  return 8 - posicao;
+}
+
 module.exports = {
   carregar,
   resetar,
@@ -220,6 +262,9 @@ module.exports = {
   getTotalMesAtual,
   getTotalMesPorNome,
   getGanhosDia,
+  getGanhosSemana,
+  removerUltimoGanho,
+  getHistoricoSemanas,
   getMeta,
   setMeta,
   getEstado,
@@ -228,4 +273,5 @@ module.exports = {
   getSemanaAtual,
   getMesAtual,
   getDataHoje,
+  getDiasRestantesSemana,
 };

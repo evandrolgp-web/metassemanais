@@ -14,6 +14,23 @@ function formatarDataBR(dataStr) {
   return `${d}/${m}/${y}`;
 }
 
+const DIAS_SEMANA = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+
+function nomeDiaSemana(dataStr) {
+  // dataStr = YYYY-MM-DD (dia em SP); usa UTC para não deslocar o dia
+  const [y, m, d] = dataStr.split('-').map(Number);
+  return DIAS_SEMANA[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+}
+
+// Linha "quanto falta por dia" para bater a meta no restante da semana.
+function linhaPorDia(falta) {
+  if (falta <= 0) return '';
+  const dias = db.getDiasRestantesSemana();
+  const porDia = falta / dias;
+  const sufixo = dias === 1 ? 'hoje (último dia)' : `por dia (${dias} dias restantes)`;
+  return `\n📈 Ritmo: ${formatarMoeda(porDia)} ${sufixo}`;
+}
+
 function barraProgresso(atual, meta) {
   const total = 10;
   const preenchido = meta > 0 ? Math.min(Math.round((atual / meta) * total), total) : 0;
@@ -67,6 +84,16 @@ function processarMensagem(texto, telefone) {
   // /meta — (re)definir a meta da semana atual
   if (/^\/meta$/i.test(msg)) {
     return pedirMeta(telefone, null);
+  }
+
+  // /desfazer — remove o último ganho registrado na semana
+  if (/^\/desfazer$/i.test(msg)) {
+    return desfazerUltimo();
+  }
+
+  // /historico ou /histórico — últimas semanas com meta vs. realizado
+  if (/^\/hist[oó]rico$/i.test(msg)) {
+    return responderHistorico();
   }
 
   // /semana
@@ -140,8 +167,61 @@ function registrarEResponder(valor, semana) {
     }
   } else {
     resposta += `⏳ Falta: *${formatarMoeda(falta)}* para a meta`;
+    resposta += linhaPorDia(falta);
   }
 
+  return resposta;
+}
+
+function desfazerUltimo() {
+  const semana = db.getSemanaAtual();
+  const removido = db.removerUltimoGanho(semana);
+  if (!removido) {
+    return '🤷 Não há nenhum ganho registrado nesta semana para desfazer.';
+  }
+
+  const meta = db.getMeta(semana);
+  const total = db.getTotalSemana(semana);
+
+  let resposta = `↩️ *Ganho removido:* ${formatarMoeda(removido.valor)}\n`;
+  resposta += `_(registrado em ${formatarDataBR(removido.data)})_\n\n`;
+  if (meta !== null) {
+    const falta = Math.max(meta - total, 0);
+    const percentual = meta > 0 ? Math.min((total / meta) * 100, 100).toFixed(1) : '0';
+    resposta += `📊 *Meta da Semana:* ${formatarMoeda(meta)}\n`;
+    resposta += `${barraProgresso(total, meta)}\n`;
+    resposta += `Acumulado: ${formatarMoeda(total)} (${percentual}%)\n`;
+    if (total < meta) {
+      resposta += `⏳ Falta: *${formatarMoeda(falta)}* para a meta`;
+      resposta += linhaPorDia(falta);
+    } else {
+      resposta += `🎉 Meta ainda atingida!`;
+    }
+  } else {
+    resposta += `Acumulado da semana: ${formatarMoeda(total)}`;
+  }
+  return resposta;
+}
+
+function responderHistorico() {
+  const semanas = db.getHistoricoSemanas(6);
+  if (semanas.length === 0) {
+    return '📭 Ainda não há histórico de semanas registrado.';
+  }
+
+  let resposta = `📜 *Histórico (últimas semanas)*\n`;
+  for (const s of semanas) {
+    const [inicio, fim] = s.semana.split('_');
+    const periodo = `${formatarDataBR(inicio).slice(0, 5)} a ${formatarDataBR(fim).slice(0, 5)}`;
+    if (s.meta === null) {
+      resposta += `\n🗓️ ${periodo}\n   Total: ${formatarMoeda(s.total)} _(sem meta)_`;
+    } else {
+      const bateu = s.total >= s.meta;
+      const icone = bateu ? '✅' : '❌';
+      const pct = s.meta > 0 ? Math.round((s.total / s.meta) * 100) : 0;
+      resposta += `\n${icone} ${periodo}\n   ${formatarMoeda(s.total)} / ${formatarMoeda(s.meta)} (${pct}%)`;
+    }
+  }
   return resposta;
 }
 
@@ -162,10 +242,24 @@ function responderSemana() {
   resposta += `${barra}\n`;
   resposta += `Total: ${formatarMoeda(total)} (${percentual}%)\n`;
 
+  // Detalhe por dia
+  const porDia = {};
+  for (const g of db.getGanhosSemana(semana)) {
+    porDia[g.data] = (porDia[g.data] || 0) + g.valor;
+  }
+  const dias = Object.keys(porDia).sort();
+  if (dias.length > 0) {
+    resposta += `\n📆 *Por dia:*\n`;
+    for (const d of dias) {
+      resposta += `• ${nomeDiaSemana(d)} ${formatarDataBR(d).slice(0, 5)}: ${formatarMoeda(porDia[d])}\n`;
+    }
+  }
+
   if (atingiu) {
     resposta += `\n🎉 *Meta atingida!* Excedente: ${formatarMoeda(total - meta)}`;
   } else {
     resposta += `\n⏳ Falta: *${formatarMoeda(falta)}* para atingir a meta`;
+    resposta += linhaPorDia(falta);
   }
 
   return resposta;
@@ -205,12 +299,14 @@ Digite apenas o valor (ex: \`150\` ou \`150,50\` ou \`R$ 200\`)
 ↳ Na primeira mensagem da semana, eu pergunto qual é a sua meta.
 
 *Consultas:*
-📊 \`/semana\` — Resumo da semana atual
+📊 \`/semana\` — Resumo da semana (com detalhe por dia)
 📅 \`/mes\` — Total do mês atual
 📅 \`/mes janeiro\` — Total de um mês específico
+📜 \`/historico\` — Últimas semanas: meta vs. realizado
 
-*Meta:*
+*Gerenciar:*
 🎯 \`/meta\` — Definir/alterar a meta da semana atual
+↩️ \`/desfazer\` — Remove o último ganho registrado
 
 _A semana vai de segunda a domingo (horário de São Paulo)._
 
