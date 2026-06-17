@@ -65,7 +65,7 @@ function processarMensagem(texto, telefone) {
     if (meta === null) {
       return '🎯 Para definir a meta da semana, envie apenas o valor.\nExemplo: `1000` ou `R$ 1.500`';
     }
-    db.setMeta(semana, meta);
+    db.setMeta(telefone, semana, meta);
     const ganhoPendente = estado.ganhoPendente;
     db.limparEstado(telefone);
 
@@ -74,7 +74,7 @@ function processarMensagem(texto, telefone) {
     resposta += `🗓️ ${formatarDataBR(inicio)} a ${formatarDataBR(fim)}\n`;
 
     if (ganhoPendente) {
-      resposta += '\n' + registrarEResponder(ganhoPendente, semana);
+      resposta += '\n' + registrarEResponder(telefone, ganhoPendente, semana);
     } else {
       resposta += '\n✅ Pronto! Agora é só enviar seus ganhos do dia.';
     }
@@ -88,31 +88,31 @@ function processarMensagem(texto, telefone) {
 
   // /desfazer — remove o último ganho registrado na semana
   if (/^\/desfazer$/i.test(msg)) {
-    return desfazerUltimo();
+    return desfazerUltimo(telefone);
   }
 
   // /historico ou /histórico — últimas semanas com meta vs. realizado
   if (/^\/hist[oó]rico$/i.test(msg)) {
-    return responderHistorico();
+    return responderHistorico(telefone);
   }
 
   // /semana
   if (/^\/semana$/i.test(msg)) {
-    if (db.getMeta(semana) === null) {
+    if (db.getMeta(telefone, semana) === null) {
       return pedirMeta(telefone, null);
     }
-    return responderSemana();
+    return responderSemana(telefone);
   }
 
   // /mes ou /mês
   if (/^\/m[eê]s$/i.test(msg)) {
-    return responderMesAtual();
+    return responderMesAtual(telefone);
   }
 
   // /mes janeiro ou /mês janeiro
   const matchMes = msg.match(/^\/m[eê]s\s+([a-záàãâéêíóôõúç]+)$/i);
   if (matchMes) {
-    return responderMesPorNome(matchMes[1]);
+    return responderMesPorNome(telefone, matchMes[1]);
   }
 
   // Lançamento retroativo: "ontem 150", "anteontem 200", "hoje 100"
@@ -121,7 +121,7 @@ function processarMensagem(texto, telefone) {
     const valorRel = parseValor(matchRel[2]);
     if (valorRel === null) return '❓ Valor inválido. Ex: `ontem 150`';
     const dias = { hoje: 0, ontem: 1, anteontem: 2 }[matchRel[1].toLowerCase()];
-    return registrarRetroativo(valorRel, db.dataRelativa(dias));
+    return registrarRetroativo(telefone, valorRel, db.dataRelativa(dias));
   }
 
   // Lançamento retroativo por data: "15/06 200" ou "15/06/2026 200"
@@ -131,7 +131,7 @@ function processarMensagem(texto, telefone) {
     if (valorData === null) return '❓ Valor inválido. Ex: `15/06 200`';
     const dataStr = db.montarData(+matchData[1], +matchData[2], matchData[3] ? +matchData[3] : null);
     if (!dataStr) return '❓ Data inválida. Use o formato `DD/MM` ou `DD/MM/AAAA`.';
-    return registrarRetroativo(valorData, dataStr);
+    return registrarRetroativo(telefone, valorData, dataStr);
   }
 
   // Editar por data: "15/06 editar 150 para 200"
@@ -144,7 +144,7 @@ function processarMensagem(texto, telefone) {
     if (antigo === null || novo === null) return '❓ Valores inválidos. Ex: `15/06 editar 150 para 200`';
     const dataStr = db.montarData(+matchEditarData[1], +matchEditarData[2], matchEditarData[3] ? +matchEditarData[3] : null);
     if (!dataStr) return '❓ Data inválida. Use `DD/MM` ou `DD/MM/AAAA`.';
-    return editarPorData(dataStr, antigo, novo);
+    return editarPorData(telefone, dataStr, antigo, novo);
   }
 
   // Editar na semana atual: "editar 150 para 200"
@@ -155,30 +155,30 @@ function processarMensagem(texto, telefone) {
     const antigo = parseValor(matchEditar[1]);
     const novo = parseValor(matchEditar[2]);
     if (antigo === null || novo === null) return '❓ Valores inválidos. Ex: `editar 150 para 200`';
-    return editarNaSemana(antigo, novo);
+    return editarNaSemana(telefone, antigo, novo);
   }
 
   // Múltiplos valores numa só mensagem: "150 200 300"
   const tokens = msg.split(/\s+/);
   if (tokens.length >= 2 && tokens.every(t => parseValor(t) !== null)) {
     const valores = tokens.map(parseValor);
-    if (db.getMeta(semana) === null) {
+    if (db.getMeta(telefone, semana) === null) {
       // Sem meta ainda: primeiro valor vira o ganho pendente; pede a meta.
       // (Para simplificar, lançamos só após a meta; aqui pedimos a meta
       // e guardamos apenas o primeiro; o usuário reenvia os demais.)
       return pedirMeta(telefone, valores[0]);
     }
-    return registrarMultiplos(valores, semana);
+    return registrarMultiplos(telefone, valores, semana);
   }
 
   // Valor (registrar ganho)
   const valor = parseValor(msg);
   if (valor !== null) {
     // Primeira mensagem da semana (sem meta definida): perguntar a meta
-    if (db.getMeta(semana) === null) {
+    if (db.getMeta(telefone, semana) === null) {
       return pedirMeta(telefone, valor);
     }
-    return registrarEResponder(valor, semana);
+    return registrarEResponder(telefone, valor, semana);
   }
 
   // Texto não reconhecido
@@ -195,17 +195,17 @@ function pedirMeta(telefone, ganhoPendente) {
   return resposta;
 }
 
-function registrarEResponder(valor, semana) {
-  db.registrarGanho(valor);
+function registrarEResponder(telefone, valor, semana) {
+  db.registrarGanho(telefone, valor);
 
-  const meta = db.getMeta(semana);
-  const totalSemana = db.getTotalSemana(semana);
+  const meta = db.getMeta(telefone, semana);
+  const totalSemana = db.getTotalSemana(telefone, semana);
   const falta = Math.max(meta - totalSemana, 0);
   const atingiu = totalSemana >= meta;
   // Este lançamento foi o que cruzou a meta agora?
   const cruzouAgora = atingiu && (totalSemana - valor) < meta;
 
-  const totalDia = db.getGanhosDia(db.getDataHoje()).reduce((s, r) => s + r.valor, 0);
+  const totalDia = db.getGanhosDia(telefone, db.getDataHoje()).reduce((s, r) => s + r.valor, 0);
 
   const barra = barraProgresso(totalSemana, meta);
   const percentual = meta > 0 ? Math.min((totalSemana / meta) * 100, 100).toFixed(1) : '0';
@@ -239,19 +239,18 @@ function registrarEResponder(valor, semana) {
 }
 
 // Registra vários ganhos de hoje numa só mensagem ("150 200 300").
-function registrarMultiplos(valores, semana) {
-  const metaAntes = db.getMeta(semana);
-  const totalAntes = db.getTotalSemana(semana);
+function registrarMultiplos(telefone, valores, semana) {
+  const totalAntes = db.getTotalSemana(telefone, semana);
 
-  for (const v of valores) db.registrarGanho(v);
+  for (const v of valores) db.registrarGanho(telefone, v);
 
-  const meta = db.getMeta(semana);
-  const totalSemana = db.getTotalSemana(semana);
+  const meta = db.getMeta(telefone, semana);
+  const totalSemana = db.getTotalSemana(telefone, semana);
   const falta = Math.max(meta - totalSemana, 0);
   const atingiu = totalSemana >= meta;
   const cruzouAgora = atingiu && totalAntes < meta;
 
-  const totalDia = db.getGanhosDia(db.getDataHoje()).reduce((s, r) => s + r.valor, 0);
+  const totalDia = db.getGanhosDia(telefone, db.getDataHoje()).reduce((s, r) => s + r.valor, 0);
   const somaLote = valores.reduce((s, v) => s + v, 0);
   const barra = barraProgresso(totalSemana, meta);
   const percentual = meta > 0 ? Math.min((totalSemana / meta) * 100, 100).toFixed(1) : '0';
@@ -280,28 +279,28 @@ function registrarMultiplos(valores, semana) {
 }
 
 // Edita um ganho da semana atual: troca um valor por outro.
-function editarNaSemana(antigo, novo) {
+function editarNaSemana(telefone, antigo, novo) {
   const semana = db.getSemanaAtual();
-  const atualizado = db.editarUltimoGanhoSemana(semana, antigo, novo);
+  const atualizado = db.editarUltimoGanhoSemana(telefone, semana, antigo, novo);
   if (!atualizado) {
     return `🤷 Não encontrei nenhum ganho de ${formatarMoeda(antigo)} nesta semana para editar.`;
   }
-  return respostaEdicao(antigo, novo, atualizado);
+  return respostaEdicao(telefone, antigo, novo, atualizado);
 }
 
 // Edita um ganho de uma data específica.
-function editarPorData(dataStr, antigo, novo) {
-  const atualizado = db.editarGanhoDia(dataStr, antigo, novo);
+function editarPorData(telefone, dataStr, antigo, novo) {
+  const atualizado = db.editarGanhoDia(telefone, dataStr, antigo, novo);
   if (!atualizado) {
     return `🤷 Não encontrei nenhum ganho de ${formatarMoeda(antigo)} em ${formatarDataBR(dataStr)} para editar.`;
   }
-  return respostaEdicao(antigo, novo, atualizado);
+  return respostaEdicao(telefone, antigo, novo, atualizado);
 }
 
-function respostaEdicao(antigo, novo, registro) {
+function respostaEdicao(telefone, antigo, novo, registro) {
   const semana = registro.semana;
-  const meta = db.getMeta(semana);
-  const total = db.getTotalSemana(semana);
+  const meta = db.getMeta(telefone, semana);
+  const total = db.getTotalSemana(telefone, semana);
   const [inicio, fim] = semana.split('_');
   const periodo = `${formatarDataBR(inicio).slice(0, 5)} a ${formatarDataBR(fim).slice(0, 5)}`;
 
@@ -325,16 +324,16 @@ function respostaEdicao(antigo, novo, registro) {
   return resposta;
 }
 
-function registrarRetroativo(valor, dataStr) {
+function registrarRetroativo(telefone, valor, dataStr) {
   if (dataStr > db.getDataHoje()) {
     return '⚠️ Não dá para lançar um ganho em data futura.';
   }
 
-  db.registrarGanho(valor, dataStr);
+  db.registrarGanho(telefone, valor, dataStr);
 
   const semana = db.getSemanaDeData(dataStr);
-  const meta = db.getMeta(semana);
-  const total = db.getTotalSemana(semana);
+  const meta = db.getMeta(telefone, semana);
+  const total = db.getTotalSemana(telefone, semana);
   const [inicio, fim] = semana.split('_');
   const periodo = `${formatarDataBR(inicio).slice(0, 5)} a ${formatarDataBR(fim).slice(0, 5)}`;
 
@@ -359,15 +358,15 @@ function registrarRetroativo(valor, dataStr) {
   return resposta;
 }
 
-function desfazerUltimo() {
+function desfazerUltimo(telefone) {
   const semana = db.getSemanaAtual();
-  const removido = db.removerUltimoGanho(semana);
+  const removido = db.removerUltimoGanho(telefone, semana);
   if (!removido) {
     return '🤷 Não há nenhum ganho registrado nesta semana para desfazer.';
   }
 
-  const meta = db.getMeta(semana);
-  const total = db.getTotalSemana(semana);
+  const meta = db.getMeta(telefone, semana);
+  const total = db.getTotalSemana(telefone, semana);
 
   let resposta = `↩️ *Ganho removido:* ${formatarMoeda(removido.valor)}\n`;
   resposta += `_(registrado em ${formatarDataBR(removido.data)})_\n\n`;
@@ -389,8 +388,8 @@ function desfazerUltimo() {
   return resposta;
 }
 
-function responderHistorico() {
-  const semanas = db.getHistoricoSemanas(6);
+function responderHistorico(telefone) {
+  const semanas = db.getHistoricoSemanas(telefone, 6);
   if (semanas.length === 0) {
     return '📭 Ainda não há histórico de semanas registrado.';
   }
@@ -411,10 +410,10 @@ function responderHistorico() {
   return resposta;
 }
 
-function responderSemana() {
+function responderSemana(telefone) {
   const semana = db.getSemanaAtual();
-  const meta = db.getMeta(semana);
-  const total = db.getTotalSemana(semana);
+  const meta = db.getMeta(telefone, semana);
+  const total = db.getTotalSemana(telefone, semana);
   const falta = Math.max(meta - total, 0);
   const atingiu = total >= meta;
   const barra = barraProgresso(total, meta);
@@ -430,7 +429,7 @@ function responderSemana() {
 
   // Detalhe por dia
   const porDia = {};
-  for (const g of db.getGanhosSemana(semana)) {
+  for (const g of db.getGanhosSemana(telefone, semana)) {
     porDia[g.data] = (porDia[g.data] || 0) + g.valor;
   }
   const dias = Object.keys(porDia).sort();
@@ -451,8 +450,8 @@ function responderSemana() {
   return resposta;
 }
 
-function responderMesAtual() {
-  const total = db.getTotalMesAtual();
+function responderMesAtual(telefone) {
+  const total = db.getTotalMesAtual(telefone);
   const mes = db.getMesAtual();
   const [ano, numMes] = mes.split('-');
   const nomeMes = NOMES_MESES[parseInt(numMes) - 1];
@@ -463,8 +462,8 @@ function responderMesAtual() {
   return resposta;
 }
 
-function responderMesPorNome(nome) {
-  const resultado = db.getTotalMesPorNome(nome);
+function responderMesPorNome(telefone, nome) {
+  const resultado = db.getTotalMesPorNome(telefone, nome);
   if (!resultado) {
     return `❌ Mês "${nome}" não reconhecido.\nExemplo: */mes janeiro*`;
   }

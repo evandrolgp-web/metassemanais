@@ -86,11 +86,12 @@ function resetar() {
 
 // ---- ganhos ----
 
-// Registra um ganho. dataStr (YYYY-MM-DD) é opcional — se omitido, usa hoje.
-function registrarGanho(valor, dataStr) {
+// Registra um ganho para um telefone. dataStr (YYYY-MM-DD) é opcional.
+function registrarGanho(telefone, valor, dataStr) {
   const d = dataStr ? dataDeStr(dataStr) : spHoje();
   dados.ganhos.push({
     id: Date.now(),
+    telefone,
     valor,
     data: formatarData(d),
     semana: getSemanaStr(d),
@@ -129,16 +130,23 @@ function getSemanaDeData(dataStr) {
   return getSemanaStr(dataDeStr(dataStr));
 }
 
-function getTotalSemana(semana) {
-  return dados.ganhos.filter(g => g.semana === semana).reduce((s, g) => s + g.valor, 0);
+// Filtra ganhos por telefone (e ignora registros antigos sem telefone só
+// quando há filtro). Se telefone for omitido, considera todos.
+function ganhosDe(telefone) {
+  if (!telefone) return dados.ganhos;
+  return dados.ganhos.filter(g => g.telefone === telefone);
 }
 
-function getTotalMesAtual() {
+function getTotalSemana(telefone, semana) {
+  return ganhosDe(telefone).filter(g => g.semana === semana).reduce((s, g) => s + g.valor, 0);
+}
+
+function getTotalMesAtual(telefone) {
   const mes = getMesStr(spHoje());
-  return dados.ganhos.filter(g => g.mes === mes).reduce((s, g) => s + g.valor, 0);
+  return ganhosDe(telefone).filter(g => g.mes === mes).reduce((s, g) => s + g.valor, 0);
 }
 
-function getTotalMesPorNome(nomeMes) {
+function getTotalMesPorNome(telefone, nomeMes) {
   const meses = {
     janeiro: '01', fevereiro: '02', marco: '03', março: '03',
     abril: '04', maio: '05', junho: '06', julho: '07',
@@ -150,23 +158,23 @@ function getTotalMesPorNome(nomeMes) {
 
   const ano = spHoje().getUTCFullYear();
   const mes = `${ano}-${num}`;
-  const total = dados.ganhos.filter(g => g.mes === mes).reduce((s, g) => s + g.valor, 0);
+  const total = ganhosDe(telefone).filter(g => g.mes === mes).reduce((s, g) => s + g.valor, 0);
   return { total, mes };
 }
 
-function getGanhosDia(data) {
-  return dados.ganhos.filter(g => g.data === data);
+function getGanhosDia(telefone, data) {
+  return ganhosDe(telefone).filter(g => g.data === data);
 }
 
-function getGanhosSemana(semana) {
-  return dados.ganhos.filter(g => g.semana === semana);
+function getGanhosSemana(telefone, semana) {
+  return ganhosDe(telefone).filter(g => g.semana === semana);
 }
 
-// Remove e retorna o último ganho registrado na semana informada.
+// Remove e retorna o último ganho do telefone na semana informada.
 // Retorna null se não houver nenhum ganho nessa semana.
-function removerUltimoGanho(semana) {
+function removerUltimoGanho(telefone, semana) {
   for (let i = dados.ganhos.length - 1; i >= 0; i--) {
-    if (dados.ganhos[i].semana === semana) {
+    if (dados.ganhos[i].telefone === telefone && dados.ganhos[i].semana === semana) {
       const [removido] = dados.ganhos.splice(i, 1);
       salvar();
       return removido;
@@ -177,9 +185,9 @@ function removerUltimoGanho(semana) {
 
 // Edita o último ganho da semana cujo valor seja igual a valorAntigo,
 // trocando-o por valorNovo. Retorna o registro atualizado ou null se não achar.
-function editarUltimoGanhoSemana(semana, valorAntigo, valorNovo) {
+function editarUltimoGanhoSemana(telefone, semana, valorAntigo, valorNovo) {
   for (let i = dados.ganhos.length - 1; i >= 0; i--) {
-    if (dados.ganhos[i].semana === semana && dados.ganhos[i].valor === valorAntigo) {
+    if (dados.ganhos[i].telefone === telefone && dados.ganhos[i].semana === semana && dados.ganhos[i].valor === valorAntigo) {
       dados.ganhos[i].valor = valorNovo;
       salvar();
       return dados.ganhos[i];
@@ -190,9 +198,9 @@ function editarUltimoGanhoSemana(semana, valorAntigo, valorNovo) {
 
 // Edita o último ganho de um dia específico (YYYY-MM-DD) cujo valor seja
 // valorAntigo, trocando-o por valorNovo. Retorna o registro ou null.
-function editarGanhoDia(dataStr, valorAntigo, valorNovo) {
+function editarGanhoDia(telefone, dataStr, valorAntigo, valorNovo) {
   for (let i = dados.ganhos.length - 1; i >= 0; i--) {
-    if (dados.ganhos[i].data === dataStr && dados.ganhos[i].valor === valorAntigo) {
+    if (dados.ganhos[i].telefone === telefone && dados.ganhos[i].data === dataStr && dados.ganhos[i].valor === valorAntigo) {
       dados.ganhos[i].valor = valorNovo;
       salvar();
       return dados.ganhos[i];
@@ -203,30 +211,33 @@ function editarGanhoDia(dataStr, valorAntigo, valorNovo) {
 
 // Retorna as últimas N semanas que têm meta definida ou algum ganho,
 // da mais recente para a mais antiga, com total e meta de cada uma.
-function getHistoricoSemanas(limite = 6) {
+function getHistoricoSemanas(telefone, limite = 6) {
+  const metasDoTel = dados.metas[telefone] || {};
   const semanas = new Set([
-    ...Object.keys(dados.metas),
-    ...dados.ganhos.map(g => g.semana),
+    ...Object.keys(metasDoTel),
+    ...ganhosDe(telefone).map(g => g.semana),
   ]);
   return [...semanas]
     .sort((a, b) => (a < b ? 1 : -1)) // mais recente primeiro (ordenação por data ISO)
     .slice(0, limite)
     .map(semana => ({
       semana,
-      meta: getMeta(semana),
-      total: getTotalSemana(semana),
+      meta: getMeta(telefone, semana),
+      total: getTotalSemana(telefone, semana),
     }));
 }
 
-// ---- metas por semana ----
+// ---- metas por telefone e semana ----
+// Estrutura: dados.metas[telefone][semana] = valor
 
-function getMeta(semana) {
-  const v = dados.metas[semana];
+function getMeta(telefone, semana) {
+  const v = dados.metas[telefone]?.[semana];
   return typeof v === 'number' ? v : null;
 }
 
-function setMeta(semana, valor) {
-  dados.metas[semana] = valor;
+function setMeta(telefone, semana, valor) {
+  if (!dados.metas[telefone]) dados.metas[telefone] = {};
+  dados.metas[telefone][semana] = valor;
   salvar();
 }
 
