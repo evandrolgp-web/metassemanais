@@ -81,6 +81,14 @@ function processarMensagem(texto, telefone) {
     return resposta;
   }
 
+  // /gasolina <valor> — registra gasto com gasolina
+  const matchGasolina = msg.match(/^\/gasolina\s+(?:r\$\s*)?(\d{1,7}(?:[.,]\d{1,2})?)$/i);
+  if (matchGasolina) {
+    const valorGas = parseValor(matchGasolina[1]);
+    if (valorGas === null) return '❓ Valor inválido. Ex: `/gasolina 150`';
+    return registrarGasolina(telefone, valorGas);
+  }
+
   // /meta — (re)definir a meta da semana atual
   if (/^\/meta$/i.test(msg)) {
     return pedirMeta(telefone, null);
@@ -185,6 +193,31 @@ function processarMensagem(texto, telefone) {
   return '❓ Não entendi. Digite */help* para ver os comandos disponíveis.';
 }
 
+function registrarGasolina(telefone, valor) {
+  db.registrarGasto(telefone, 'gasolina', valor);
+
+  const semana = db.getSemanaAtual();
+  const totalGanhos = db.getTotalSemana(telefone, semana);
+  const totalGastos = db.getTotalGastosSemana(telefone, semana);
+  const lucro = totalGanhos - totalGastos;
+
+  let resposta = `⛽ *Gasto com gasolina registrado!*\n`;
+  resposta += `💸 Valor: ${formatarMoeda(valor)}\n\n`;
+  resposta += `📊 *Resumo da semana:*\n`;
+  resposta += `💰 Ganhos: ${formatarMoeda(totalGanhos)}\n`;
+  resposta += `⛽ Custos: ${formatarMoeda(totalGastos)}\n`;
+  resposta += `✨ Lucro: *${formatarMoeda(lucro)}*`;
+  return resposta;
+}
+
+// Retorna as linhas de custo e lucro para exibir em resumos.
+// Só exibe se houver algum gasto registrado na semana/mês.
+function linhasCustoLucro(ganhos, gastos) {
+  if (gastos === 0) return '';
+  const lucro = ganhos - gastos;
+  return `\n⛽ Custos: ${formatarMoeda(gastos)}\n✨ Lucro: *${formatarMoeda(lucro)}*`;
+}
+
 function pedirMeta(telefone, ganhoPendente) {
   db.setEstado(telefone, { aguardandoMeta: true, ganhoPendente: ganhoPendente || null });
   let resposta = '🎯 *Nova semana!* Qual é a sua meta para esta semana?\n';
@@ -235,6 +268,7 @@ function registrarEResponder(telefone, valor, semana) {
     resposta += linhaPorDia(falta);
   }
 
+  resposta += linhasCustoLucro(totalSemana, db.getTotalGastosSemana(telefone, semana));
   return resposta;
 }
 
@@ -275,6 +309,7 @@ function registrarMultiplos(telefone, valores, semana) {
     resposta += `⏳ Falta: *${formatarMoeda(falta)}* para a meta`;
     resposta += linhaPorDia(falta);
   }
+  resposta += linhasCustoLucro(totalSemana, db.getTotalGastosSemana(telefone, semana));
   return resposta;
 }
 
@@ -399,12 +434,14 @@ function responderHistorico(telefone) {
     const [inicio, fim] = s.semana.split('_');
     const periodo = `${formatarDataBR(inicio).slice(0, 5)} a ${formatarDataBR(fim).slice(0, 5)}`;
     if (s.meta === null) {
-      resposta += `\n🗓️ ${periodo}\n   Total: ${formatarMoeda(s.total)} _(sem meta)_`;
+      const lucroLinha = s.gastos > 0 ? ` | ⛽ ${formatarMoeda(s.gastos)} | ✨ ${formatarMoeda(s.total - s.gastos)}` : '';
+      resposta += `\n🗓️ ${periodo}\n   Total: ${formatarMoeda(s.total)}${lucroLinha} _(sem meta)_`;
     } else {
       const bateu = s.total >= s.meta;
       const icone = bateu ? '✅' : '❌';
       const pct = s.meta > 0 ? Math.round((s.total / s.meta) * 100) : 0;
-      resposta += `\n${icone} ${periodo}\n   ${formatarMoeda(s.total)} / ${formatarMoeda(s.meta)} (${pct}%)`;
+      const lucroLinha = s.gastos > 0 ? `\n   ⛽ ${formatarMoeda(s.gastos)} | ✨ ${formatarMoeda(s.total - s.gastos)}` : '';
+      resposta += `\n${icone} ${periodo}\n   ${formatarMoeda(s.total)} / ${formatarMoeda(s.meta)} (${pct}%)${lucroLinha}`;
     }
   }
   return resposta;
@@ -447,17 +484,20 @@ function responderSemana(telefone) {
     resposta += linhaPorDia(falta);
   }
 
+  resposta += linhasCustoLucro(total, db.getTotalGastosSemana(telefone, semana));
   return resposta;
 }
 
 function responderMesAtual(telefone) {
   const total = db.getTotalMesAtual(telefone);
   const mes = db.getMesAtual();
+  const gastos = db.getTotalGastosMesAtual(telefone);
   const [ano, numMes] = mes.split('-');
   const nomeMes = NOMES_MESES[parseInt(numMes) - 1];
 
   let resposta = `📅 *Resumo de ${nomeMes}/${ano}*\n\n`;
-  resposta += `💰 Total do mês: *${formatarMoeda(total)}*`;
+  resposta += `💰 Ganhos: *${formatarMoeda(total)}*`;
+  resposta += linhasCustoLucro(total, gastos);
 
   return resposta;
 }
@@ -468,11 +508,13 @@ function responderMesPorNome(telefone, nome) {
     return `❌ Mês "${nome}" não reconhecido.\nExemplo: */mes janeiro*`;
   }
 
+  const gastos = db.getTotalGastosMes(telefone, resultado.mes);
   const [ano, numMes] = resultado.mes.split('-');
   const nomeMes = NOMES_MESES[parseInt(numMes) - 1];
 
   let resposta = `📅 *Resumo de ${nomeMes}/${ano}*\n\n`;
-  resposta += `💰 Total do mês: *${formatarMoeda(resultado.total)}*`;
+  resposta += `💰 Ganhos: *${formatarMoeda(resultado.total)}*`;
+  resposta += linhasCustoLucro(resultado.total, gastos);
 
   return resposta;
 }
@@ -492,9 +534,13 @@ Digite apenas o valor (ex: \`150\` ou \`150,50\` ou \`R$ 200\`)
 *Corrigir um valor errado:*
 \`editar 150 para 200\` · \`15/06 editar 150 para 200\`
 
+*Gastos com gasolina:*
+⛽ \`/gasolina 150\` — Registra um gasto com gasolina
+↳ Aparece como custo nos resumos de semana, mês e histórico.
+
 *Consultas:*
-📊 \`/semana\` — Resumo da semana (com detalhe por dia)
-📅 \`/mes\` — Total do mês atual
+📊 \`/semana\` — Resumo da semana (com detalhe por dia, custo e lucro)
+📅 \`/mes\` — Ganhos, custos e lucro do mês atual
 📅 \`/mes janeiro\` — Total de um mês específico
 📜 \`/historico\` — Últimas semanas: meta vs. realizado
 

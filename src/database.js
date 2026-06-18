@@ -5,9 +5,8 @@ const axios = require('axios');
 const DB_PATH = path.join(__dirname, '..', 'data', 'ganhos.json');
 const TZ = 'America/Sao_Paulo';
 
-// Estrutura:
-// { ganhos: [...], metas: { "INICIO_FIM": valor }, estado: { "telefone": {...} } }
-let dados = { ganhos: [], metas: {}, estado: {} };
+// { ganhos: [...], gastos: [...], metas: { telefone: { semana: valor } }, estado: { "telefone": {...} } }
+let dados = { ganhos: [], gastos: [], metas: {}, estado: {} };
 let remotoOk = false;
 
 function gistConfig() {
@@ -26,6 +25,7 @@ function gistConfig() {
 function normalizarEstrutura(obj) {
   return {
     ganhos: Array.isArray(obj?.ganhos) ? obj.ganhos : [],
+    gastos: Array.isArray(obj?.gastos) ? obj.gastos : [],
     metas: obj && typeof obj.metas === 'object' ? obj.metas : {},
     estado: obj && typeof obj.estado === 'object' ? obj.estado : {},
   };
@@ -52,7 +52,7 @@ async function carregar() {
   try {
     dados = normalizarEstrutura(JSON.parse(fs.readFileSync(DB_PATH, 'utf8')));
   } catch {
-    dados = { ganhos: [], metas: {}, estado: {} };
+    dados = { ganhos: [], gastos: [], metas: {}, estado: {} };
   }
 }
 
@@ -80,7 +80,7 @@ function salvar() {
 }
 
 function resetar() {
-  dados = { ganhos: [], metas: {}, estado: {} };
+  dados = { ganhos: [], gastos: [], metas: {}, estado: {} };
   salvar();
 }
 
@@ -128,6 +128,42 @@ function montarData(dia, mes, ano) {
 
 function getSemanaDeData(dataStr) {
   return getSemanaStr(dataDeStr(dataStr));
+}
+
+// ---- gastos (ex: gasolina) ----
+
+function registrarGasto(telefone, tipo, valor, dataStr) {
+  const d = dataStr ? dataDeStr(dataStr) : spHoje();
+  dados.gastos.push({
+    id: Date.now(),
+    telefone,
+    tipo,
+    valor,
+    data: formatarData(d),
+    semana: getSemanaStr(d),
+    mes: getMesStr(d),
+    ano: d.getUTCFullYear(),
+    criado_em: new Date().toISOString(),
+  });
+  salvar();
+}
+
+function gastosDe(telefone) {
+  if (!telefone) return dados.gastos;
+  return dados.gastos.filter(g => g.telefone === telefone);
+}
+
+function getTotalGastosSemana(telefone, semana) {
+  return gastosDe(telefone).filter(g => g.semana === semana).reduce((s, g) => s + g.valor, 0);
+}
+
+function getTotalGastosMesAtual(telefone) {
+  const mes = getMesStr(spHoje());
+  return gastosDe(telefone).filter(g => g.mes === mes).reduce((s, g) => s + g.valor, 0);
+}
+
+function getTotalGastosMes(telefone, mes) {
+  return gastosDe(telefone).filter(g => g.mes === mes).reduce((s, g) => s + g.valor, 0);
 }
 
 // Filtra ganhos por telefone (e ignora registros antigos sem telefone só
@@ -224,6 +260,7 @@ function getHistoricoSemanas(telefone, limite = 6) {
       semana,
       meta: getMeta(telefone, semana),
       total: getTotalSemana(telefone, semana),
+      gastos: getTotalGastosSemana(telefone, semana),
     }));
 }
 
@@ -324,8 +361,12 @@ module.exports = {
   carregar,
   resetar,
   registrarGanho,
+  registrarGasto,
   getTotalSemana,
+  getTotalGastosSemana,
   getTotalMesAtual,
+  getTotalGastosMesAtual,
+  getTotalGastosMes,
   getTotalMesPorNome,
   dataRelativa,
   montarData,
