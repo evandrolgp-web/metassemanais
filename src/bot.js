@@ -149,6 +149,11 @@ function processarMensagem(texto, telefone) {
     return desfazerUltimo(telefone);
   }
 
+  // /resumo ou /geral — visão geral de dia, semana e mês
+  if (/^\/(resumo|geral)$/i.test(msg)) {
+    return responderResumo(telefone);
+  }
+
   // /historico ou /histórico — últimas semanas com meta vs. realizado
   if (/^\/hist[oó]rico$/i.test(msg)) {
     return responderHistorico(telefone);
@@ -328,12 +333,52 @@ function linhasCustoLucro(ganhos, gastos) {
 
 function pedirMeta(telefone, ganhoPendente) {
   db.setEstado(telefone, { aguardandoMeta: true, ganhoPendente: ganhoPendente || null });
-  let resposta = '🎯 *Nova semana!* Qual é a sua meta para esta semana?\n';
+
+  let resposta = '';
+
+  // Fechamento da semana anterior: só aparece quando a semana atual ainda
+  // está zerada (nenhum ganho/gasto) — ou seja, é a primeira ação de uma
+  // nova semana. Mantém o bot 100% reativo (só mostra quando você escreve).
+  const semanaAtual = db.getSemanaAtual();
+  const semAtividadeNaSemana =
+    db.getTotalSemana(telefone, semanaAtual) === 0 &&
+    db.getTotalGastosSemana(telefone, semanaAtual) === 0;
+  if (semAtividadeNaSemana) {
+    const fechamento = fecharSemanaAnterior(telefone);
+    if (fechamento) resposta += fechamento + '\n\n';
+  }
+
+  resposta += '🎯 *Nova semana!* Qual é a sua meta para esta semana?\n';
   resposta += 'Envie apenas o valor. Exemplo: `1000` ou `R$ 1.500`';
   if (ganhoPendente) {
     resposta += `\n\n_(seu ganho de ${formatarMoeda(ganhoPendente)} será registrado em seguida)_`;
   }
   return resposta;
+}
+
+// Monta o resumo de fechamento da semana anterior. Retorna null se a semana
+// passada não teve meta nem nenhum lançamento (nada a fechar).
+function fecharSemanaAnterior(telefone) {
+  const semana = db.getSemanaDeData(db.dataRelativa(7));
+  const meta = db.getMeta(telefone, semana);
+  const ganhos = db.getTotalSemana(telefone, semana);
+  const gastos = db.getTotalGastosSemana(telefone, semana);
+  if (meta === null && ganhos === 0 && gastos === 0) return null;
+
+  const [inicio, fim] = semana.split('_');
+  const periodo = `${formatarDataBR(inicio).slice(0, 5)} a ${formatarDataBR(fim).slice(0, 5)}`;
+  const lucro = ganhos - gastos;
+
+  let r = `🏁 *Fechamento da semana ${periodo}*\n`;
+  if (meta !== null) {
+    const bateu = ganhos >= meta;
+    const pct = meta > 0 ? Math.round((ganhos / meta) * 100) : 0;
+    r += `🎯 Meta: ${formatarMoeda(meta)} ${bateu ? '✅ batida' : '❌ não batida'} (${pct}%)\n`;
+  }
+  r += `💰 Ganhos: ${formatarMoeda(ganhos)}\n`;
+  if (gastos > 0) r += `⛽ Custos: ${formatarMoeda(gastos)}\n`;
+  r += `✨ Lucro: *${formatarMoeda(lucro)}*`;
+  return r;
 }
 
 function registrarEResponder(telefone, valor, semana) {
@@ -501,6 +546,52 @@ function registrarRetroativo(telefone, valor, dataStr) {
   return resposta;
 }
 
+// Visão geral num só comando: dia, semana e mês, com custos e lucro.
+function responderResumo(telefone) {
+  const semana = db.getSemanaAtual();
+  const hoje = db.getDataHoje();
+
+  const ganhosDia = db.getGanhosDia(telefone, hoje).reduce((s, r) => s + r.valor, 0);
+  const meta = db.getMeta(telefone, semana);
+  const ganhosSemana = db.getTotalSemana(telefone, semana);
+  const gastosSemana = db.getTotalGastosSemana(telefone, semana);
+  const ganhosMes = db.getTotalMesAtual(telefone);
+  const gastosMes = db.getTotalGastosMesAtual(telefone);
+
+  const mes = db.getMesAtual();
+  const [anoM, numMes] = mes.split('-');
+  const nomeMes = NOMES_MESES[parseInt(numMes) - 1];
+  const [inicio, fim] = semana.split('_');
+
+  let r = `📋 *Resumo geral*\n`;
+
+  // Hoje
+  r += `\n☀️ *Hoje (${formatarDataBR(hoje).slice(0, 5)})*\n`;
+  r += `💰 Ganhos: ${formatarMoeda(ganhosDia)}\n`;
+
+  // Semana
+  r += `\n📊 *Semana (${formatarDataBR(inicio).slice(0, 5)} a ${formatarDataBR(fim).slice(0, 5)})*\n`;
+  if (meta !== null) {
+    const pct = meta > 0 ? Math.min((ganhosSemana / meta) * 100, 100).toFixed(0) : '0';
+    r += `🎯 Meta: ${formatarMoeda(meta)}\n`;
+    r += `${barraProgresso(ganhosSemana, meta)} ${pct}%\n`;
+  }
+  r += `💰 Ganhos: ${formatarMoeda(ganhosSemana)}\n`;
+  r += `⛽ Custos: ${formatarMoeda(gastosSemana)}\n`;
+  r += `✨ Lucro: *${formatarMoeda(ganhosSemana - gastosSemana)}*\n`;
+  if (meta !== null && ganhosSemana < meta) {
+    r += `⏳ Falta: ${formatarMoeda(meta - ganhosSemana)} para a meta\n`;
+  }
+
+  // Mês
+  r += `\n📅 *${nomeMes}/${anoM}*\n`;
+  r += `💰 Ganhos: ${formatarMoeda(ganhosMes)}\n`;
+  r += `⛽ Custos: ${formatarMoeda(gastosMes)}\n`;
+  r += `✨ Lucro: *${formatarMoeda(ganhosMes - gastosMes)}*`;
+
+  return r;
+}
+
 function desfazerUltimo(telefone) {
   const semana = db.getSemanaAtual();
   const removido = db.removerUltimoGanho(telefone, semana);
@@ -650,6 +741,7 @@ Digite apenas o valor (ex: \`150\` ou \`150,50\` ou \`R$ 200\`)
 ↳ Aparece como custo nos resumos de semana, mês e histórico.
 
 *Consultas:*
+📋 \`/resumo\` — Visão geral: dia, semana e mês de uma vez
 📊 \`/semana\` — Resumo da semana (com detalhe por dia, custo e lucro)
 📅 \`/mes\` — Ganhos, custos e lucro do mês atual
 📅 \`/mes janeiro\` — Total de um mês específico
