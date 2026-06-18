@@ -81,7 +81,52 @@ function processarMensagem(texto, telefone) {
     return resposta;
   }
 
-  // /gasolina <valor> — registra gasto com gasolina
+  // ----- gasolina: registrar, retroativo, editar -----
+
+  // /gasolina editar 100 para 120  (corrige um gasto na semana atual)
+  const matchGasEditar = msg.match(
+    /^\/gasolina\s+editar\s+(?:r\$\s*)?(\d{1,7}(?:[.,]\d{1,2})?)\s+para\s+(?:r\$\s*)?(\d{1,7}(?:[.,]\d{1,2})?)$/i
+  );
+  if (matchGasEditar) {
+    const antigo = parseValor(matchGasEditar[1]);
+    const novo = parseValor(matchGasEditar[2]);
+    if (antigo === null || novo === null) return '❓ Valores inválidos. Ex: `/gasolina editar 100 para 120`';
+    return editarGasolinaNaSemana(telefone, antigo, novo);
+  }
+
+  // /gasolina 15/06 editar 100 para 120  (corrige um gasto de uma data)
+  const matchGasEditarData = msg.match(
+    /^\/gasolina\s+(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\s+editar\s+(?:r\$\s*)?(\d{1,7}(?:[.,]\d{1,2})?)\s+para\s+(?:r\$\s*)?(\d{1,7}(?:[.,]\d{1,2})?)$/i
+  );
+  if (matchGasEditarData) {
+    const antigo = parseValor(matchGasEditarData[4]);
+    const novo = parseValor(matchGasEditarData[5]);
+    if (antigo === null || novo === null) return '❓ Valores inválidos. Ex: `/gasolina 15/06 editar 100 para 120`';
+    const dataStr = db.montarData(+matchGasEditarData[1], +matchGasEditarData[2], matchGasEditarData[3] ? +matchGasEditarData[3] : null);
+    if (!dataStr) return '❓ Data inválida. Use `DD/MM` ou `DD/MM/AAAA`.';
+    return editarGasolinaPorData(telefone, dataStr, antigo, novo);
+  }
+
+  // /gasolina ontem 100 · /gasolina anteontem 100 · /gasolina hoje 100
+  const matchGasRel = msg.match(/^\/gasolina\s+(hoje|ontem|anteontem)\s+(?:r\$\s*)?(\d{1,7}(?:[.,]\d{1,2})?)$/i);
+  if (matchGasRel) {
+    const valorGas = parseValor(matchGasRel[2]);
+    if (valorGas === null) return '❓ Valor inválido. Ex: `/gasolina ontem 100`';
+    const dias = { hoje: 0, ontem: 1, anteontem: 2 }[matchGasRel[1].toLowerCase()];
+    return registrarGasolina(telefone, valorGas, db.dataRelativa(dias));
+  }
+
+  // /gasolina 15/06 100 · /gasolina 15/06/2026 100
+  const matchGasData = msg.match(/^\/gasolina\s+(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\s+(?:r\$\s*)?(\d{1,7}(?:[.,]\d{1,2})?)$/i);
+  if (matchGasData) {
+    const valorGas = parseValor(matchGasData[4]);
+    if (valorGas === null) return '❓ Valor inválido. Ex: `/gasolina 15/06 100`';
+    const dataStr = db.montarData(+matchGasData[1], +matchGasData[2], matchGasData[3] ? +matchGasData[3] : null);
+    if (!dataStr) return '❓ Data inválida. Use `DD/MM` ou `DD/MM/AAAA`.';
+    return registrarGasolina(telefone, valorGas, dataStr);
+  }
+
+  // /gasolina <valor> — registra gasto com gasolina (hoje)
   const matchGasolina = msg.match(/^\/gasolina\s+(?:r\$\s*)?(\d{1,7}(?:[.,]\d{1,2})?)$/i);
   if (matchGasolina) {
     const valorGas = parseValor(matchGasolina[1]);
@@ -92,6 +137,11 @@ function processarMensagem(texto, telefone) {
   // /meta — (re)definir a meta da semana atual
   if (/^\/meta$/i.test(msg)) {
     return pedirMeta(telefone, null);
+  }
+
+  // /desfazer gasto (ou /desfazer gasolina) — remove o último gasto da semana
+  if (/^\/desfazer\s+(gasto|gasolina)$/i.test(msg)) {
+    return desfazerUltimoGasto(telefone);
   }
 
   // /desfazer — remove o último ganho registrado na semana
@@ -193,20 +243,78 @@ function processarMensagem(texto, telefone) {
   return '❓ Não entendi. Digite */help* para ver os comandos disponíveis.';
 }
 
-function registrarGasolina(telefone, valor) {
-  db.registrarGasto(telefone, 'gasolina', valor);
+function registrarGasolina(telefone, valor, dataStr) {
+  if (dataStr && dataStr > db.getDataHoje()) {
+    return '⚠️ Não dá para lançar um gasto em data futura.';
+  }
 
-  const semana = db.getSemanaAtual();
+  db.registrarGasto(telefone, 'gasolina', valor, dataStr);
+
+  const semana = dataStr ? db.getSemanaDeData(dataStr) : db.getSemanaAtual();
   const totalGanhos = db.getTotalSemana(telefone, semana);
   const totalGastos = db.getTotalGastosSemana(telefone, semana);
   const lucro = totalGanhos - totalGastos;
+  const [inicio, fim] = semana.split('_');
+  const periodo = `${formatarDataBR(inicio).slice(0, 5)} a ${formatarDataBR(fim).slice(0, 5)}`;
 
   let resposta = `⛽ *Gasto com gasolina registrado!*\n`;
-  resposta += `💸 Valor: ${formatarMoeda(valor)}\n\n`;
-  resposta += `📊 *Resumo da semana:*\n`;
+  resposta += `💸 Valor: ${formatarMoeda(valor)}\n`;
+  if (dataStr) resposta += `📅 ${nomeDiaSemana(dataStr)}, ${formatarDataBR(dataStr)}\n`;
+  resposta += `\n📊 *Resumo da semana (${periodo}):*\n`;
   resposta += `💰 Ganhos: ${formatarMoeda(totalGanhos)}\n`;
   resposta += `⛽ Custos: ${formatarMoeda(totalGastos)}\n`;
   resposta += `✨ Lucro: *${formatarMoeda(lucro)}*`;
+  return resposta;
+}
+
+function desfazerUltimoGasto(telefone) {
+  const semana = db.getSemanaAtual();
+  const removido = db.removerUltimoGasto(telefone, semana);
+  if (!removido) {
+    return '🤷 Não há nenhum gasto registrado nesta semana para desfazer.';
+  }
+  const totalGanhos = db.getTotalSemana(telefone, semana);
+  const totalGastos = db.getTotalGastosSemana(telefone, semana);
+
+  let resposta = `↩️ *Gasto removido:* ${formatarMoeda(removido.valor)}\n`;
+  resposta += `_(${removido.tipo}, registrado em ${formatarDataBR(removido.data)})_\n\n`;
+  resposta += `💰 Ganhos: ${formatarMoeda(totalGanhos)}\n`;
+  resposta += `⛽ Custos: ${formatarMoeda(totalGastos)}\n`;
+  resposta += `✨ Lucro: *${formatarMoeda(totalGanhos - totalGastos)}*`;
+  return resposta;
+}
+
+function editarGasolinaNaSemana(telefone, antigo, novo) {
+  const semana = db.getSemanaAtual();
+  const atualizado = db.editarUltimoGastoSemana(telefone, semana, antigo, novo);
+  if (!atualizado) {
+    return `🤷 Não encontrei nenhum gasto de ${formatarMoeda(antigo)} nesta semana para editar.`;
+  }
+  return respostaEdicaoGasto(telefone, antigo, novo, atualizado);
+}
+
+function editarGasolinaPorData(telefone, dataStr, antigo, novo) {
+  const atualizado = db.editarGastoDia(telefone, dataStr, antigo, novo);
+  if (!atualizado) {
+    return `🤷 Não encontrei nenhum gasto de ${formatarMoeda(antigo)} em ${formatarDataBR(dataStr)} para editar.`;
+  }
+  return respostaEdicaoGasto(telefone, antigo, novo, atualizado);
+}
+
+function respostaEdicaoGasto(telefone, antigo, novo, registro) {
+  const semana = registro.semana;
+  const totalGanhos = db.getTotalSemana(telefone, semana);
+  const totalGastos = db.getTotalGastosSemana(telefone, semana);
+  const [inicio, fim] = semana.split('_');
+  const periodo = `${formatarDataBR(inicio).slice(0, 5)} a ${formatarDataBR(fim).slice(0, 5)}`;
+
+  let resposta = `✏️ *Gasto corrigido!*\n`;
+  resposta += `${formatarMoeda(antigo)} → *${formatarMoeda(novo)}*\n`;
+  resposta += `_(${registro.tipo}, em ${nomeDiaSemana(registro.data)}, ${formatarDataBR(registro.data)})_\n\n`;
+  resposta += `📊 *Semana ${periodo}*\n`;
+  resposta += `💰 Ganhos: ${formatarMoeda(totalGanhos)}\n`;
+  resposta += `⛽ Custos: ${formatarMoeda(totalGastos)}\n`;
+  resposta += `✨ Lucro: *${formatarMoeda(totalGanhos - totalGastos)}*`;
   return resposta;
 }
 
@@ -536,6 +644,9 @@ Digite apenas o valor (ex: \`150\` ou \`150,50\` ou \`R$ 200\`)
 
 *Gastos com gasolina:*
 ⛽ \`/gasolina 150\` — Registra um gasto com gasolina
+📅 \`/gasolina ontem 100\` · \`/gasolina 15/06 100\` — em dia passado
+✏️ \`/gasolina editar 100 para 120\` — corrige um valor
+↩️ \`/desfazer gasto\` — remove o último gasto
 ↳ Aparece como custo nos resumos de semana, mês e histórico.
 
 *Consultas:*

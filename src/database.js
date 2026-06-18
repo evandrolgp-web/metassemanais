@@ -166,6 +166,43 @@ function getTotalGastosMes(telefone, mes) {
   return gastosDe(telefone).filter(g => g.mes === mes).reduce((s, g) => s + g.valor, 0);
 }
 
+// Remove e retorna o último gasto do telefone na semana informada, ou null.
+function removerUltimoGasto(telefone, semana) {
+  for (let i = dados.gastos.length - 1; i >= 0; i--) {
+    if (dados.gastos[i].telefone === telefone && dados.gastos[i].semana === semana) {
+      const [removido] = dados.gastos.splice(i, 1);
+      salvar();
+      return removido;
+    }
+  }
+  return null;
+}
+
+// Edita o último gasto da semana cujo valor seja valorAntigo. Retorna o
+// registro atualizado ou null se não achar.
+function editarUltimoGastoSemana(telefone, semana, valorAntigo, valorNovo) {
+  for (let i = dados.gastos.length - 1; i >= 0; i--) {
+    if (dados.gastos[i].telefone === telefone && dados.gastos[i].semana === semana && dados.gastos[i].valor === valorAntigo) {
+      dados.gastos[i].valor = valorNovo;
+      salvar();
+      return dados.gastos[i];
+    }
+  }
+  return null;
+}
+
+// Edita o último gasto de um dia específico cujo valor seja valorAntigo.
+function editarGastoDia(telefone, dataStr, valorAntigo, valorNovo) {
+  for (let i = dados.gastos.length - 1; i >= 0; i--) {
+    if (dados.gastos[i].telefone === telefone && dados.gastos[i].data === dataStr && dados.gastos[i].valor === valorAntigo) {
+      dados.gastos[i].valor = valorNovo;
+      salvar();
+      return dados.gastos[i];
+    }
+  }
+  return null;
+}
+
 // Filtra ganhos por telefone (e ignora registros antigos sem telefone só
 // quando há filtro). Se telefone for omitido, considera todos.
 function ganhosDe(telefone) {
@@ -362,6 +399,9 @@ module.exports = {
   resetar,
   registrarGanho,
   registrarGasto,
+  removerUltimoGasto,
+  editarUltimoGastoSemana,
+  editarGastoDia,
   getTotalSemana,
   getTotalGastosSemana,
   getTotalMesAtual,
