@@ -26,8 +26,9 @@ function normalizarEstrutura(obj) {
   return {
     ganhos: Array.isArray(obj?.ganhos) ? obj.ganhos : [],
     gastos: Array.isArray(obj?.gastos) ? obj.gastos : [],
-    metas: obj && typeof obj.metas === 'object' ? obj.metas : {},
-    estado: obj && typeof obj.estado === 'object' ? obj.estado : {},
+    // typeof null === 'object', por isso verificamos também !== null
+    metas: (obj?.metas && typeof obj.metas === 'object') ? obj.metas : {},
+    estado: (obj?.estado && typeof obj.estado === 'object') ? obj.estado : {},
   };
 }
 
@@ -37,7 +38,10 @@ async function carregar() {
     try {
       const resp = await axios.get(cfg.url, { headers: cfg.headers });
       const arquivo = resp.data.files['ganhos.json'];
-      dados = normalizarEstrutura(arquivo ? JSON.parse(arquivo.content) : null);
+      // Se o arquivo não existir no Gist, não tratamos como banco vazio —
+      // lançamos erro para evitar sobrescrever dados bons com estrutura vazia.
+      if (!arquivo) throw new Error('arquivo ganhos.json não encontrado no Gist');
+      dados = normalizarEstrutura(JSON.parse(arquivo.content));
       remotoOk = true;
       console.log(`💾 Dados carregados do GitHub Gist (${dados.ganhos.length} registros)`);
       return;
