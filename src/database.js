@@ -56,6 +56,10 @@ async function carregar() {
   }
 }
 
+// Fila de saves ao Gist: garante que PATCHes sejam enviados em série,
+// evitando que uma resposta mais lenta sobrescreva uma mais recente.
+let filaGist = Promise.resolve();
+
 function salvar() {
   try {
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
@@ -65,18 +69,20 @@ function salvar() {
   }
 
   const cfg = gistConfig();
-  if (cfg && remotoOk) {
+  if (!cfg || !remotoOk) return;
+
+  // Captura snapshot dos dados no momento do save — não usa referência
+  // que poderia mudar antes do PATCH ser enviado.
+  const conteudo = JSON.stringify(dados, null, 2);
+
+  filaGist = filaGist.then(() =>
     axios
-      .patch(
-        cfg.url,
-        { files: { 'ganhos.json': { content: JSON.stringify(dados, null, 2) } } },
-        { headers: cfg.headers }
-      )
+      .patch(cfg.url, { files: { 'ganhos.json': { content: conteudo } } }, { headers: cfg.headers })
       .then(() => console.log('💾 Dados salvos no Gist'))
       .catch((err) =>
         console.error('⚠️ Falha ao salvar no Gist:', err.response?.data?.message || err.message)
-      );
-  }
+      )
+  );
 }
 
 function resetar() {
