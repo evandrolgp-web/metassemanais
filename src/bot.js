@@ -25,15 +25,13 @@ function nomeDiaSemana(dataStr) {
 // Linha "quanto falta por dia" para bater a meta no restante da semana.
 function linhaPorDia(falta) {
   if (falta <= 0) return '';
-  const dias = db.getDiasRestantesSemana();
-  const porDia = falta / dias;
-  let sufixo;
-  if (dias === 1) {
-    sufixo = 'hoje (último dia)';
-  } else {
-    const restantes = dias - 1;
-    sufixo = `por dia (hoje + ${restantes} dia${restantes > 1 ? 's' : ''})`;
+  const diasComHoje = db.getDiasRestantesSemana();
+  const proximosDias = diasComHoje - 1; // exclui hoje
+  if (proximosDias <= 0) {
+    return `\n📈 Ritmo: ${formatarMoeda(falta)} hoje (último dia)`;
   }
+  const porDia = falta / proximosDias;
+  const sufixo = proximosDias === 1 ? 'amanhã (1 dia)' : `por dia (${proximosDias} dias)`;
   return `\n📈 Ritmo: ${formatarMoeda(porDia)} ${sufixo}`;
 }
 
