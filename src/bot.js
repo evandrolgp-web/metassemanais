@@ -27,7 +27,13 @@ function linhaPorDia(falta) {
   if (falta <= 0) return '';
   const dias = db.getDiasRestantesSemana();
   const porDia = falta / dias;
-  const sufixo = dias === 1 ? 'hoje (último dia)' : `por dia (${dias} dias restantes)`;
+  let sufixo;
+  if (dias === 1) {
+    sufixo = 'hoje (último dia)';
+  } else {
+    const restantes = dias - 1;
+    sufixo = `por dia (hoje + ${restantes} dia${restantes > 1 ? 's' : ''})`;
+  }
   return `\n📈 Ritmo: ${formatarMoeda(porDia)} ${sufixo}`;
 }
 
